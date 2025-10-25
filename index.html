@@ -102,6 +102,10 @@ const tg = isTelegram ? window.Telegram.WebApp : null;
 
 const manifestUrl = (location.origin + location.pathname).replace(/\/$/, '') + '/tonconnect-manifest.json';
 const tonUI = new TON_CONNECT_UI.TonConnectUI({ manifestUrl });
+// try to restore previous TON connection if wallet allows it
+if (tonUI.restoreConnection) {
+  try { tonUI.restoreConnection(); } catch(_) {}
+}
 
 // -------------- Elements -------------------------------
 const startBtn = document.getElementById('startBtn');
@@ -208,16 +212,34 @@ async function syncLockFromBackend(){
 }
 
 // -------------- First load -----------------------------
-// try read any session hint (non-authoritative)
-lockedAddress = readLockSession();
-walletLocked = !!lockedAddress;
-await syncLockFromBackend(); // top-level await works because we are a module
+// Diagnostic banner to see why Start is disabled
+(function diagnostic(){
+  const bar=document.createElement('div');
+  bar.style.cssText='position:fixed;left:12px;bottom:12px;font:12px/1.4 system-ui;color:#9fc2d9;background:#091023;padding:8px 10px;border:1px solid #1e2a44;border-radius:8px;opacity:.9;z-index:9';
+  bar.id='diagBar';
+  document.body.appendChild(bar);
+  function render(){
+    bar.innerHTML =
+      'TG:'+ (isTelegram?'✅':'❌') +
+      ' • Wallet:'+ (walletLocked?'✅':'❌') +
+      ' • Addr:'+ (lockedAddress?shortAddr(lockedAddress):'—');
+  }
+  setInterval(render,500);
+})();
+
 applyLockUI();
 enableStartIfEligible();
 
 // -------------- TON Connect flow -----------------------
 async function openTonModal(){
   if(walletLocked){ return; }
+  try{
+    await tonUI.openModal();
+  }catch(e){
+    console.warn('TON Connect modal error:', e);
+    alert('TON Connect error: '+ (e && e.message ? e.message : e));
+  }
+}
   try{
     await tonUI.openModal(); // Supports Telegram Wallet
   }catch(e){
@@ -228,6 +250,16 @@ async function openTonModal(){
 // react to wallet status changes
 // NOTE: ensure the connected account is read and locked only once
 let tonStatusHandled = false;
+// If already connected (restored), lock immediately
+try {
+  const w = tonUI?.getConnectedWallet?.();
+  if(w && w.account){
+    const addr = w.account.address || w.account.addresses?.[0]?.address || null;
+    if(addr){
+      walletLocked=true; lockedAddress=addr; cacheLockSession(lockedAddress);
+    }
+  }
+} catch(_) {}
 // react to wallet status changes (one-time lock)
 let tonStatusHandled = false;
 tonUI.onStatusChange(async (walletInfo) => {
