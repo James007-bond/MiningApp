@@ -26,7 +26,6 @@
   input{width:100%;margin-top:6px;padding:8px;border-radius:8px;border:none;background:#061225;color:#cfeffd}
   .badge{display:inline-block;padding:4px 8px;border-radius:999px;font-size:12px;margin-left:8px;background:#0b3b2f;color:#9ff2d9;border:1px solid #14b8a6;}
   .addr{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;}
-  /* Link Wallet her zaman tıklanabilir (kilit yokken) */
   #linkWalletBtn{ position:relative; z-index:2; pointer-events:auto; }
 </style>
 <!-- TON Connect UI (CDN) -->
@@ -84,8 +83,8 @@
 
 <!-- Tek dosya: module script -->
 <script type="module">
-/* === Basit, tek dosyalı Mini App mantığı ===
-   - Wallet sadece TON Connect ile bağlanır.
+/* === Tek dosyalık Mini App mantığı ===
+   - Wallet sadece TON Connect ile bağlanır (elle giriş yok).
    - Wallet yoksa Start hiçbir zaman aktif olmaz.
    - Kilit varsa Link Wallet gizlenir.
 */
@@ -95,8 +94,6 @@ const isTelegram = !!(window.Telegram && window.Telegram.WebApp);
 const tg = isTelegram ? window.Telegram.WebApp : null;
 const manifestUrl = (location.origin + location.pathname).replace(/\/$/, '') + '/tonconnect-manifest.json';
 const tonUI = new TON_CONNECT_UI.TonConnectUI({ manifestUrl });
-
-// Bağlantı restore denemesi (cüzdana bağlı)
 if (tonUI.restoreConnection) { try { tonUI.restoreConnection(); } catch(_) {} }
 
 // ----------------- Elements -----------------
@@ -126,14 +123,29 @@ const formatTime = s => `${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%
 const setStatus = t => statusEl.textContent = t;
 const shortAddr = a => !a ? '—' : (a.length>16 ? a.slice(0,8)+'…'+a.slice(-6) : a);
 
+// Adres normalize edici: obje/ham JSON/string her durumdan temiz string döner
+function normalizeTonAddr(a) {
+  if (a == null) return "";
+  if (typeof a === "string" && a.includes("{") && a.includes("address")) {
+    try { a = JSON.parse(a); } catch(_) {}
+  }
+  if (typeof a === "object") {
+    if (typeof a.address === "string") a = a.address;
+    else if (Array.isArray(a.addresses) && typeof a.addresses[0]?.address === "string") a = a.addresses[0].address;
+    else if (typeof a.toString === "function") a = a.toString();
+    else return "";
+  }
+  if (typeof a !== "string") return "";
+  a = a.trim().replace(/\s+/g, "").toUpperCase();
+  return a;
+}
+
 function applyLockUI(){
   const hasLock = walletLocked && !!lockedAddress;
 
-  // input asla elle yazılamaz
-  walletInput.value = hasLock ? lockedAddress : '';
+  walletInput.value = hasLock ? normalizeTonAddr(lockedAddress) : "";
   walletInput.readOnly = true;
 
-  // Link Wallet davranışı:
   if (hasLock) {
     linkWalletBtn.style.display = 'none';
   } else {
@@ -143,15 +155,12 @@ function applyLockUI(){
     linkWalletBtn.style.opacity = '1';
   }
 
-  // rozet, aktif adres, ipucu
   lockBadge.style.display = hasLock ? 'inline-block' : 'none';
-  linkedAddrEl.textContent = shortAddr(lockedAddress);
+  linkedAddrEl.textContent = shortAddr(normalizeTonAddr(lockedAddress));
   walletHint.textContent = hasLock ? 'Wallet is locked for this bot.' : 'Waiting for approval…';
 
-  // Start tuşu koşulu
   enableStartIfEligible();
 
-  // Telegram MainButton metni
   if (isTelegram) {
     try {
       tg.MainButton.show();
@@ -197,24 +206,21 @@ async function openTonModal(){
   }
 }
 linkWalletBtn.addEventListener('click', (e)=>{
-  e.preventDefault();
-  e.stopPropagation();
+  e.preventDefault(); e.stopPropagation();
   openTonModal();
 });
 
-// Eğer daha önce bağlanmışsa (restore) kilitle
+// Restore ile gelmişse hemen kilitle
 try {
   const w = tonUI?.getConnectedWallet?.();
-  if (w?.account) {
-    lockedAddress = w.account.address || w.account.addresses?.[0]?.address || null;
-    walletLocked = !!lockedAddress;
-  }
+  const addr = normalizeTonAddr(w?.account?.address ?? w?.account?.addresses?.[0]?.address ?? null);
+  if (addr) { lockedAddress = addr; walletLocked = true; }
 } catch(_) {}
 
 let tonStatusHandled = false;
 tonUI.onStatusChange((walletInfo)=>{
   if (walletLocked || tonStatusHandled) return;
-  const addr = walletInfo?.account?.address || walletInfo?.account?.addresses?.[0]?.address || null;
+  const addr = normalizeTonAddr(walletInfo?.account?.address ?? walletInfo?.account?.addresses?.[0]?.address ?? null);
   if (addr) {
     tonStatusHandled = true;
     lockedAddress = addr;
@@ -243,7 +249,6 @@ function startMining(){
       acceptedCount++;
       accepted.textContent=acceptedCount;
       earn.textContent=(acceptedCount*0.00005).toFixed(6)+' TON';
-      // tg.sendData(...) burada opsiyonel
     }
   },1000);
 
