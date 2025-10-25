@@ -92,9 +92,11 @@
 // ----------------- TON & Telegram -----------------
 const isTelegram = !!(window.Telegram && window.Telegram.WebApp);
 const tg = isTelegram ? window.Telegram.WebApp : null;
-const manifestUrl = (location.origin + location.pathname).replace(/\/$/, '') + '/tonconnect-manifest.json';
-const tonUI = new TON_CONNECT_UI.TonConnectUI({ manifestUrl });
-if (tonUI.restoreConnection) { try { tonUI.restoreConnection(); } catch(_) {} }
+
+// >>> Manifest URL sabit <<<
+const tonUI = new TON_CONNECT_UI.TonConnectUI({
+  manifestUrl: 'https://james007-bond.github.io/MiningApp/tonconnect-manifest.json'
+});
 
 // ----------------- Elements -----------------
 const startBtn = document.getElementById('startBtn');
@@ -140,6 +142,11 @@ function normalizeTonAddr(a) {
   return a;
 }
 
+function enableStartIfEligible(){
+  const canStart = isTelegram && walletLocked && !!lockedAddress && !running;
+  startBtn.disabled = !canStart;
+}
+
 function applyLockUI(){
   const hasLock = walletLocked && !!lockedAddress;
 
@@ -164,22 +171,12 @@ function applyLockUI(){
   if (isTelegram) {
     try {
       tg.MainButton.show();
-      if (hasLock) {
-        tg.MainButton.enable();
-        tg.MainButton.setText('Start Mining');
-        tg.MainButton.onClick(()=>{ if(!startBtn.disabled) startMining(); });
-      } else {
-        tg.MainButton.enable();
-        tg.MainButton.setText('Link Wallet');
-        tg.MainButton.onClick(()=>{ openTonModal(); });
-      }
+      tg.MainButton.setText(hasLock ? 'Start Mining' : 'Link Wallet');
+      tg.MainButton.onClick(()=>{ hasLock ? startMining() : openTonModal(); });
     } catch(_) {}
+  } else {
+    startBtn.title = 'Open inside Telegram';
   }
-}
-
-function enableStartIfEligible(){
-  const canStart = isTelegram && walletLocked && !!lockedAddress && !running;
-  startBtn.disabled = !canStart;
 }
 
 // ----------------- Telegram setup -----------------
@@ -191,8 +188,6 @@ if (isTelegram) {
     if(th.bg_color){ document.documentElement.style.setProperty('--bg', th.bg_color); }
     if(th.text_color){ document.documentElement.style.setProperty('--fg', th.text_color); }
   } catch(_) {}
-} else {
-  startBtn.title = 'Open inside Telegram';
 }
 
 // ----------------- TON Connect flow -----------------
@@ -210,24 +205,19 @@ linkWalletBtn.addEventListener('click', (e)=>{
   openTonModal();
 });
 
-// Restore ile gelmişse hemen kilitle
-try {
-  const w = tonUI?.getConnectedWallet?.();
-  const addr = normalizeTonAddr(w?.account?.address ?? w?.account?.addresses?.[0]?.address ?? null);
-  if (addr) { lockedAddress = addr; walletLocked = true; }
-} catch(_) {}
-
-let tonStatusHandled = false;
+// >>> Restore/önbellek YOK. Adres sadece onStatusChange ile set edilir.
 tonUI.onStatusChange((walletInfo)=>{
-  if (walletLocked || tonStatusHandled) return;
   const addr = normalizeTonAddr(walletInfo?.account?.address ?? walletInfo?.account?.addresses?.[0]?.address ?? null);
   if (addr) {
-    tonStatusHandled = true;
     lockedAddress = addr;
     walletLocked = true;
     setStatus('Wallet linked & locked');
-    applyLockUI();
+  } else {
+    lockedAddress = null;
+    walletLocked = false;
+    setStatus('Ready');
   }
+  applyLockUI();
 });
 
 // ----------------- Mining (demo) -----------------
