@@ -26,6 +26,8 @@
   input{width:100%;margin-top:6px;padding:8px;border-radius:8px;border:none;background:#061225;color:#cfeffd}
   .badge{display:inline-block;padding:4px 8px;border-radius:999px;font-size:12px;margin-left:8px;background:#0b3b2f;color:#9ff2d9;border:1px solid #14b8a6;}
   .addr{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;}
+  /* Link Wallet her zaman tıklanabilir (kilit yokken) */
+  #linkWalletBtn{ position:relative; z-index:2; pointer-events:auto; }
 </style>
 <!-- TON Connect UI (CDN) -->
 <script src="https://unpkg.com/@tonconnect/ui@2.3.1/dist/tonconnect-ui.min.js"></script>
@@ -53,7 +55,7 @@
             <div id="walletHint" class="stat" style="margin-top:6px">Waiting for approval…</div>
           </div>
           <div style="display:flex;gap:8px">
-            <button id="linkWalletBtn" class="ghost">Link Wallet</button>
+            <button id="linkWalletBtn" class="ghost" title="Link your TON wallet">Link Wallet</button>
           </div>
         </div>
 
@@ -80,34 +82,24 @@
     </div>
   </div>
 
-<!-- IMPORTANT: use type="module" so top-level await works without breaking the page -->
+<!-- Tek dosya: module script -->
 <script type="module">
-/* GOALS
-   - Start works on ALL Telegram clients (iOS/Android/Desktop/Web).
-   - Start only after first TON Connect approval (wallet locked).
-   - Optional backend sync keeps lock across devices.
-
-   TODOs for production:
-   1) Set BACKEND_URL to your bot API.
-   2) Host a valid tonconnect-manifest.json at the same origin/path (HTTPS), or change manifestUrl accordingly.
-   3) Enforce the lock on your backend using Telegram WebApp initData verification (HMAC SHA-256).
+/* === Basit, tek dosyalı Mini App mantığı ===
+   - Wallet sadece TON Connect ile bağlanır.
+   - Wallet yoksa Start hiçbir zaman aktif olmaz.
+   - Kilit varsa Link Wallet gizlenir.
 */
 
-// -------------- CONFIG (optional backend) --------------
-const BACKEND_URL = ""; // REQUIRED for durable lock across sessions; server must delete mapping when user deletes the bot/chat // e.g. "https://your-bot-api.example.com/webapp/lock"
-
-// -------------- Telegram & TON Connect -----------------
+// ----------------- TON & Telegram -----------------
 const isTelegram = !!(window.Telegram && window.Telegram.WebApp);
 const tg = isTelegram ? window.Telegram.WebApp : null;
-
 const manifestUrl = (location.origin + location.pathname).replace(/\/$/, '') + '/tonconnect-manifest.json';
 const tonUI = new TON_CONNECT_UI.TonConnectUI({ manifestUrl });
-// try to restore previous TON connection if wallet allows it
-if (tonUI.restoreConnection) {
-  try { tonUI.restoreConnection(); } catch(_) {}
-}
 
-// -------------- Elements -------------------------------
+// Bağlantı restore denemesi (cüzdana bağlı)
+if (tonUI.restoreConnection) { try { tonUI.restoreConnection(); } catch(_) {} }
+
+// ----------------- Elements -----------------
 const startBtn = document.getElementById('startBtn');
 const stopBtn = document.getElementById('stopBtn');
 const meter = document.getElementById('meterBar');
@@ -123,44 +115,27 @@ const linkedAddrEl = document.getElementById('linkedAddr');
 const lockBadge = document.getElementById('lockBadge');
 const walletHint = document.getElementById('walletHint');
 
-// -------------- State ----------------------------------
+// ----------------- State -----------------
 let running=false, secs=0, acceptedCount=0, fakeHR=0;
 let tInterval=null, runtimeInterval=null;
-
 let walletLocked = false;
 let lockedAddress = null;
 
-// -------------- Persist (session cache only) ------------------------
-// Requirement: Wallet address can only be set via TON Connect (Link Wallet).
-// It should remain associated until the Mini App (bot) is deleted. That durable
-// persistence must be enforced on the BACKEND keyed to Telegram initData.
-// On the client we only keep a session cache so the user cannot "manually" set it
-// and it won't linger if the page is reloaded without backend confirmation.
-function cacheLockSession(addr){
-  try{ sessionStorage.setItem('lockedAddress', addr || ''); }catch{}
-}
-function readLockSession(){
-  try{ const a = sessionStorage.getItem('lockedAddress') || null; return a; }catch{ return null; }
-}
-
-// -------------- UI Helpers ----------------------------- -----------------------------
-function formatTime(s){ const m=Math.floor(s/60).toString().padStart(2,'0'); const ss=(s%60).toString().padStart(2,'0'); return m+':'+ss; }
-function setStatus(txt){ statusEl.innerText=txt; }
-function shortAddr(a){ if(!a) return '—'; return a.length>16 ? a.slice(0,8)+'…'+a.slice(-6) : a; }
-function resolveActiveAddress(){ return lockedAddress || null; }
+// ----------------- Helpers -----------------
+const formatTime = s => `${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`;
+const setStatus = t => statusEl.textContent = t;
+const shortAddr = a => !a ? '—' : (a.length>16 ? a.slice(0,8)+'…'+a.slice(-6) : a);
 
 function applyLockUI(){
   const hasLock = walletLocked && !!lockedAddress;
-  lockBadge.style.display = hasLock ? 'inline-block' : 'none';
-  walletInput.value = hasLock ? lockedAddress : '';
-  walletInput.readOnly = true; // NEVER editable
 
-  // Link Wallet button should be clickable whenever there is NO lock
+  // input asla elle yazılamaz
+  walletInput.value = hasLock ? lockedAddress : '';
+  walletInput.readOnly = true;
+
+  // Link Wallet davranışı:
   if (hasLock) {
     linkWalletBtn.style.display = 'none';
-    linkWalletBtn.disabled = true;
-    linkWalletBtn.style.pointerEvents = 'none';
-    linkWalletBtn.style.opacity = '';
   } else {
     linkWalletBtn.style.display = 'inline-block';
     linkWalletBtn.disabled = false;
@@ -168,10 +143,15 @@ function applyLockUI(){
     linkWalletBtn.style.opacity = '1';
   }
 
+  // rozet, aktif adres, ipucu
+  lockBadge.style.display = hasLock ? 'inline-block' : 'none';
   linkedAddrEl.textContent = shortAddr(lockedAddress);
   walletHint.textContent = hasLock ? 'Wallet is locked for this bot.' : 'Waiting for approval…';
 
-  // Also sync Telegram MainButton behavior
+  // Start tuşu koşulu
+  enableStartIfEligible();
+
+  // Telegram MainButton metni
   if (isTelegram) {
     try {
       tg.MainButton.show();
@@ -184,199 +164,99 @@ function applyLockUI(){
         tg.MainButton.setText('Link Wallet');
         tg.MainButton.onClick(()=>{ openTonModal(); });
       }
-    } catch(_){}
+    } catch(_) {}
   }
 }
 
 function enableStartIfEligible(){
-  const hasAddr = !!resolveActiveAddress();
-  const canStart = isTelegram && hasAddr && !running;
+  const canStart = isTelegram && walletLocked && !!lockedAddress && !running;
   startBtn.disabled = !canStart;
-  if(isTelegram){
-    try{
-      tg.MainButton.show();
-      if(canStart){ tg.MainButton.enable(); tg.MainButton.setText('Start Mining'); }
-      else { tg.MainButton.disable(); tg.MainButton.setText(hasAddr?'Open in Telegram':'Link Wallet First'); }
-    }catch(_){/* ignore */}
-  }
 }
 
-// -------------- Telegram setup -------------------------
-if(isTelegram){
-  try{
+// ----------------- Telegram setup -----------------
+if (isTelegram) {
+  try {
     tg.ready();
     tg.expand();
     const th = tg.themeParams || {};
     if(th.bg_color){ document.documentElement.style.setProperty('--bg', th.bg_color); }
     if(th.text_color){ document.documentElement.style.setProperty('--fg', th.text_color); }
-    tg.MainButton.onClick(()=>{ if(!startBtn.disabled) startMining(); });
-  }catch(e){/* ignore */}
+  } catch(_) {}
 } else {
-  // If opened outside Telegram, hint to open inside TG
   startBtn.title = 'Open inside Telegram';
 }
 
-// -------------- Optional backend sync ------------------
-async function syncLockFromBackend(){
-  if(!isTelegram || !BACKEND_URL) return;
-  try{
-    const initData = tg.initData || "";
-    const res = await fetch(BACKEND_URL + "/status", {
-      method: "POST",
-      headers: {"Content-Type":"application/json"},
-      body: JSON.stringify({ initData })
-    });
-    if(!res.ok) return;
-    const data = await res.json(); // { locked:boolean, address:string|null }
-    if(data && data.locked && data.address){
-      walletLocked = true;
-      lockedAddress = data.address;
-      cacheLockSession(lockedAddress); // session-only hint; server is source of truth
-    } else {
-      walletLocked = false;
-      lockedAddress = null;
-      cacheLockSession('');
-    }
-  }catch(e){ /* silent */ }
-}
-
-// -------------- First load -----------------------------
-// Diagnostic banner to see why Start is disabled
-(function diagnostic(){
-  const bar=document.createElement('div');
-  bar.style.cssText='position:fixed;left:12px;bottom:12px;font:12px/1.4 system-ui;color:#9fc2d9;background:#091023;padding:8px 10px;border:1px solid #1e2a44;border-radius:8px;opacity:.9;z-index:9';
-  bar.id='diagBar';
-  document.body.appendChild(bar);
-  function render(){
-    bar.innerHTML =
-      'TG:'+ (isTelegram?'✅':'❌') +
-      ' • Wallet:'+ (walletLocked?'✅':'❌') +
-      ' • Addr:'+ (lockedAddress?shortAddr(lockedAddress):'—');
-  }
-  setInterval(render,500);
-})();
-
-applyLockUI();
-enableStartIfEligible();
-
-// -------------- TON Connect flow -----------------------
+// ----------------- TON Connect flow -----------------
 async function openTonModal(){
-  if(walletLocked){ return; }
-  try{
-    await tonUI.openModal();
-  }catch(e){
+  if (walletLocked) return;
+  try {
+    await tonUI.openModal(); // Telegram Wallet dâhil
+  } catch(e){
     console.warn('TON Connect modal error:', e);
-    alert('TON Connect error: '+ (e && e.message ? e.message : e));
+    alert('TON Connect error: ' + (e?.message || e));
   }
 }
-  try{
-    await tonUI.openModal(); // Supports Telegram Wallet
-  }catch(e){
-    console.warn('TON Connect modal error:', e);
-  }
-}
+linkWalletBtn.addEventListener('click', (e)=>{
+  e.preventDefault();
+  e.stopPropagation();
+  openTonModal();
+});
 
-// react to wallet status changes
-// NOTE: ensure the connected account is read and locked only once
-let tonStatusHandled = false;
-// If already connected (restored), lock immediately
+// Eğer daha önce bağlanmışsa (restore) kilitle
 try {
   const w = tonUI?.getConnectedWallet?.();
-  if(w && w.account){
-    const addr = w.account.address || w.account.addresses?.[0]?.address || null;
-    if(addr){
-      walletLocked=true; lockedAddress=addr; cacheLockSession(lockedAddress);
-    }
+  if (w?.account) {
+    lockedAddress = w.account.address || w.account.addresses?.[0]?.address || null;
+    walletLocked = !!lockedAddress;
   }
 } catch(_) {}
-// react to wallet status changes (one-time lock)
+
 let tonStatusHandled = false;
-tonUI.onStatusChange(async (walletInfo) => {
-  if(walletLocked) return;
-  if(!walletInfo || tonStatusHandled) return;
-  if(walletInfo.account){
-    const addr = walletInfo.account.address || walletInfo.account.addresses?.[0]?.address || null;
-    if(addr){
-      tonStatusHandled = true;
-      walletLocked = true;
-      lockedAddress = addr;
-      cacheLockSession(lockedAddress);
-      applyLockUI(); enableStartIfEligible(); setStatus('Wallet linked & locked');
-
-      if(isTelegram && BACKEND_URL){
-        try{
-          const initData = tg.initData || "";
-          await fetch(BACKEND_URL + "/lock", {
-            method: "POST",
-            headers: {"Content-Type":"application/json"},
-            body: JSON.stringify({ initData, address: lockedAddress })
-          });
-        }catch(e){/* ignore */}
-      }
-    }
-  }
-});
-      applyLockUI(); enableStartIfEligible(); setStatus('Wallet linked & locked');
-
-      // 2) (optional) persist lock on server
-      if(isTelegram && BACKEND_URL){
-        try{
-          const initData = tg.initData || "";
-          await fetch(BACKEND_URL + "/lock", {
-            method: "POST",
-            headers: {"Content-Type":"application/json"},
-            body: JSON.stringify({ initData, address: lockedAddress })
-          });
-        }catch(e){/* ignore */}
-      }
-    }
+tonUI.onStatusChange((walletInfo)=>{
+  if (walletLocked || tonStatusHandled) return;
+  const addr = walletInfo?.account?.address || walletInfo?.account?.addresses?.[0]?.address || null;
+  if (addr) {
+    tonStatusHandled = true;
+    lockedAddress = addr;
+    walletLocked = true;
+    setStatus('Wallet linked & locked');
+    applyLockUI();
   }
 });
 
-// -------------- Buttons --------------------------------
-linkWalletBtn.addEventListener('click', openTonModal);
-
+// ----------------- Mining (demo) -----------------
 function startMining(){
-  if(!isTelegram){ alert('Please open this Mini App inside Telegram.'); return; }
-  if(!walletLocked || !lockedAddress){ alert('Link & approve a TON wallet first.'); return; }
-  if(running) return;
+  if (!isTelegram){ alert('Please open this Mini App inside Telegram.'); return; }
+  if (!walletLocked || !lockedAddress){ alert('Link & approve a TON wallet first.'); return; }
+  if (running) return;
 
   running=true; secs=0; acceptedCount=0; fakeHR=0;
   startBtn.style.display='none'; stopBtn.style.display='inline-block';
   setStatus('Mining…');
-  meter.style.width='4%'; hrText.innerText='0 H/s'; accepted.innerText='0'; earn.innerText='0 TON';
+  meter.style.width='4%'; hrText.textContent='0 H/s'; accepted.textContent='0'; earn.textContent='0 TON';
 
   tInterval=setInterval(()=>{
     fakeHR=Math.max(1,Math.floor(50+Math.random()*1400));
     const w=Math.min(100,4+fakeHR/15);
-    meter.style.width=w+'%'; hrText.innerText=fakeHR+' H/s';
+    meter.style.width=w+'%'; hrText.textContent=fakeHR+' H/s';
     if(Math.random()<0.18){
       acceptedCount++;
-      accepted.innerText=acceptedCount;
-      earn.innerText=(acceptedCount*0.00005).toFixed(6)+' TON';
-      if(isTelegram){
-        try{
-          tg.sendData(JSON.stringify({
-            action:'share',
-            wallet: lockedAddress,
-            accepted: acceptedCount,
-            hr: fakeHR
-          }));
-        }catch(_){/* ignore */}
-      }
+      accepted.textContent=acceptedCount;
+      earn.textContent=(acceptedCount*0.00005).toFixed(6)+' TON';
+      // tg.sendData(...) burada opsiyonel
     }
   },1000);
 
   runtimeInterval=setInterval(()=>{
     secs++;
-    runtime.innerText=formatTime(secs);
+    runtime.textContent=formatTime(secs);
   },1000);
 
   enableStartIfEligible();
 }
 
 function stopMining(){
-  if(!running)return;
+  if (!running) return;
   running=false;
   startBtn.style.display='inline-block'; stopBtn.style.display='none';
   setStatus('Stopped');
@@ -386,19 +266,17 @@ function stopMining(){
 }
 
 function withdraw(){
-  if(!isTelegram){ alert('Open inside Telegram to withdraw.'); return; }
-  if(!walletLocked || !lockedAddress){ alert('No locked wallet. Link & approve first.'); return; }
-
-  const amount=parseFloat((earn.innerText||'0 TON').replace(' TON',''))||0;
-  const payload={action:'withdraw',wallet:lockedAddress,amount,accepted:acceptedCount,hr:fakeHR,ts:Date.now()};
-  try{ tg.sendData(JSON.stringify(payload)); setStatus('Withdraw sent to bot'); }
-  catch(e){ alert('sendData error: '+e.message); }
+  if (!isTelegram){ alert('Open inside Telegram to withdraw.'); return; }
+  if (!walletLocked || !lockedAddress){ alert('No locked wallet. Link & approve first.'); return; }
+  alert('Withdraw request (demo): '+earn.textContent+' → '+shortAddr(lockedAddress));
 }
 
-startBtn.addEventListener('click',startMining);
-stopBtn.addEventListener('click',stopMining);
-withdrawBtn.addEventListener('click',withdraw);
+startBtn.addEventListener('click', startMining);
+stopBtn.addEventListener('click', stopMining);
+withdrawBtn.addEventListener('click', withdraw);
 
+// ----------------- İlk UI çizimi -----------------
+applyLockUI();
 </script>
 </body>
 </html>
