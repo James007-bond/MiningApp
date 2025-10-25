@@ -1,5 +1,12 @@
 {
-  "url": "https://james007-bond.github.io/MiningApp/",
+  "manifestVersion": 2,
   "name": "MiningApp",
-  "iconUrl": "https://ton.org/favicon.ico"
+  "url": "https://james007-bond.github.io/MiningApp/",
+  "iconUrl": "https://ton.org/favicon.ico",
+  "platforms": ["ios", "android", "macos", "windows", "linux", "web"],
+  "bridge": {
+    "url": "https://bridge.tonapi.io/bridge"
+  },
+  "termsOfUseUrl": "https://james007-bond.github.io/MiningApp/terms",
+  "privacyPolicyUrl": "https://james007-bond.github.io/MiningApp/privacy"
 }
