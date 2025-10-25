@@ -153,10 +153,39 @@ function applyLockUI(){
   const hasLock = walletLocked && !!lockedAddress;
   lockBadge.style.display = hasLock ? 'inline-block' : 'none';
   walletInput.value = hasLock ? lockedAddress : '';
-  walletInput.readOnly = true; // no manual edit allowed
-  linkWalletBtn.style.display = hasLock ? 'none' : 'inline-block';
+  walletInput.readOnly = true; // NEVER editable
+
+  // Link Wallet button should be clickable whenever there is NO lock
+  if (hasLock) {
+    linkWalletBtn.style.display = 'none';
+    linkWalletBtn.disabled = true;
+    linkWalletBtn.style.pointerEvents = 'none';
+    linkWalletBtn.style.opacity = '';
+  } else {
+    linkWalletBtn.style.display = 'inline-block';
+    linkWalletBtn.disabled = false;
+    linkWalletBtn.style.pointerEvents = 'auto';
+    linkWalletBtn.style.opacity = '1';
+  }
+
   linkedAddrEl.textContent = shortAddr(lockedAddress);
   walletHint.textContent = hasLock ? 'Wallet is locked for this bot.' : 'Waiting for approval…';
+
+  // Also sync Telegram MainButton behavior
+  if (isTelegram) {
+    try {
+      tg.MainButton.show();
+      if (hasLock) {
+        tg.MainButton.enable();
+        tg.MainButton.setText('Start Mining');
+        tg.MainButton.onClick(()=>{ if(!startBtn.disabled) startMining(); });
+      } else {
+        tg.MainButton.enable();
+        tg.MainButton.setText('Link Wallet');
+        tg.MainButton.onClick(()=>{ openTonModal(); });
+      }
+    } catch(_){}
+  }
 }
 
 function enableStartIfEligible(){
