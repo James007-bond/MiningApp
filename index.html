@@ -39,7 +39,7 @@
         <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
           <div>
             <div class="stat">Status: <strong id="status">Ready</strong></div>
-            <small>Mining starts only when Telegram + TON wallet are ready.</small>
+            <small>Mining starts only when Telegram + wallet address are ready.</small>
           </div>
           <div style="display:flex;gap:8px;flex-wrap:wrap">
             <button id="startBtn" disabled>Start</button>
@@ -49,9 +49,9 @@
 
         <div style="margin-top:12px;display:grid;grid-template-columns:1fr auto auto;gap:8px;align-items:end">
           <div>
-            <label for="wallet">TON Wallet / Withdraw Address</label>
-            <input id="wallet" placeholder="EQ..." autocomplete="off">
-            <div class="hint">Use “Link Wallet” to auto-fill from your TON wallet. (Address must start with <b>EQ</b> or <b>Ef</b>.)</div>
+            <label for="wallet">Wallet / Withdraw Address</label>
+            <input id="wallet" placeholder="Enter your address" autocomplete="off">
+            <div class="hint">Address can start with any letter or number. It just must not be empty.</div>
           </div>
           <button id="linkWalletBtn" class="ghost">Link Wallet</button>
           <button id="disconnectBtn" class="ghost" style="display:none">Disconnect</button>
@@ -71,8 +71,8 @@
       <div class="panel">
         <div class="stat"><strong>Overview</strong></div>
         <div class="stat">Uptime: <span id="runtime">00:00</span></div>
-        <div class="stat">Demo balance: <span id="earn">0 TON</span></div>
-        <div class="stat">Linked address: <span id="linkedAddr" class="addr">—</span></div>
+        <div class="stat">Balance: <span id="earn">0 TON</span></div>
+        <!--<div class="stat">Linked address: <span id="linkedAddr" class="addr">—</span></div>-->
         <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
           <button id="withdrawBtn">Withdraw</button>
         </div>
@@ -81,9 +81,9 @@
   </div>
 
 <script>
-/* Requirements to start mining:
-   1) Running inside Telegram WebApp
-   2) Valid TON address present (from input or TON Connect link)
+/* Start koşulu:
+   1) Telegram WebApp içinde açılmış olacak
+   2) Boş olmayan bir adres (elle veya TON Connect ile) olacak
 */
 
 const isTelegram = !!(window.Telegram && window.Telegram.WebApp);
@@ -116,22 +116,18 @@ let linkedAddress=null;
 // Helpers
 function formatTime(s){ const m=Math.floor(s/60).toString().padStart(2,'0'); const ss=(s%60).toString().padStart(2,'0'); return m+':'+ss; }
 function setStatus(txt){ statusEl.innerText=txt; }
-function isTonAddr(a){ return /^(EQ|Ef)[A-Za-z0-9_-]{10,}$/.test((a||'').trim()); }
+function isNonEmptyAddr(a){ return /^[A-Za-z0-9].{2,}$/.test((a||'').trim()); } // ilk karakter harf/rakam ve min. 3 uzunluk
 function persistWallet(){ try{ localStorage.setItem('wallet', walletInput.value.trim()); }catch{} }
 function loadWallet(){ try{ const w=localStorage.getItem('wallet'); if(w) walletInput.value=w; }catch{} }
 function shortAddr(a){ if(!a) return '—'; return a.length>16 ? a.slice(0,8)+'…'+a.slice(-6) : a; }
-
 function resolveActiveAddress(){
-  // priority: TON Connect linkedAddress -> input field
   const inp = (walletInput.value||'').trim();
-  return linkedAddress || (inp && isTonAddr(inp) ? inp : null);
+  return linkedAddress || (isNonEmptyAddr(inp) ? inp : null);
 }
-
 function updateLinkedUI(){
   linkedAddrEl.textContent = shortAddr(linkedAddress);
   disconnectBtn.style.display = linkedAddress ? 'inline-block' : 'none';
 }
-
 function enableStartIfEligible(){
   const hasAddr = !!resolveActiveAddress();
   const canStart = isTelegram && hasAddr && !running;
@@ -140,7 +136,7 @@ function enableStartIfEligible(){
   if(isTelegram){
     try{
       if(canStart){ tg.MainButton.enable(); tg.MainButton.setText('Start Mining'); }
-      else { tg.MainButton.disable(); tg.MainButton.setText('Set Wallet First'); }
+      else { tg.MainButton.disable(); tg.MainButton.setText('Set Address First'); }
     }catch(_){}
   }
 }
@@ -164,42 +160,25 @@ if(isTelegram){
 // TON Connect wiring
 async function openTonModal(){
   try{
-    await tonUI.openModal(); // opens wallets list (Telegram Wallet supported)
+    await tonUI.openModal(); // Telegram Wallet dâhil cüzdan listesi
   }catch(e){
     console.warn('TON Connect modal error:', e);
   }
 }
-
-// When connection status changes
 tonUI.onStatusChange((walletInfo) => {
   if(walletInfo && walletInfo.account){
-    // Standard TON Connect v2 address (hex, raw, or user-friendly base64)
-    // UI lib usually exposes .address as user-friendly
     const addr = walletInfo.account.address || walletInfo.account.addresses?.[0]?.address || null;
     linkedAddress = addr || null;
-    if(linkedAddress && !isTonAddr(linkedAddress)){
-      // If address is not user-friendly, keep input fallback
-      console.warn('Non-user-friendly address from wallet, leaving input as-is');
-    } else if(linkedAddress){
-      walletInput.value = linkedAddress;
-      persistWallet();
-    }
-    updateLinkedUI();
-    enableStartIfEligible();
-    setStatus('Wallet linked');
+    if(linkedAddress){ walletInput.value = linkedAddress; persistWallet(); }
+    updateLinkedUI(); enableStartIfEligible(); setStatus('Wallet linked');
   } else {
-    linkedAddress = null;
-    updateLinkedUI();
-    enableStartIfEligible();
-    setStatus('Wallet disconnected');
+    linkedAddress = null; updateLinkedUI(); enableStartIfEligible(); setStatus('Wallet disconnected');
   }
 });
 
 // Buttons
 linkWalletBtn.addEventListener('click', openTonModal);
-disconnectBtn.addEventListener('click', async ()=>{
-  try{ await tonUI.disconnect(); } catch(_){}
-});
+disconnectBtn.addEventListener('click', async ()=>{ try{ await tonUI.disconnect(); } catch(_){ } });
 
 walletInput.addEventListener('input', ()=>{ persistWallet(); enableStartIfEligible(); });
 walletInput.addEventListener('change', ()=>{ persistWallet(); enableStartIfEligible(); });
@@ -208,11 +187,10 @@ walletInput.addEventListener('change', ()=>{ persistWallet(); enableStartIfEligi
 function startMining(){
   if(!isTelegram){ alert('Please open this Mini App inside Telegram.'); return; }
   const addr = resolveActiveAddress();
-  if(!addr){ alert('Link wallet or enter a valid TON address first.'); walletInput.focus(); return; }
-
+  if(!addr){ alert('Link wallet or enter an address first.'); walletInput.focus(); return; }
   if(running) return;
-  running=true; secs=0; acceptedCount=0; fakeHR=0;
 
+  running=true; secs=0; acceptedCount=0; fakeHR=0;
   startBtn.style.display='none'; stopBtn.style.display='inline-block';
   setStatus('Mining…');
   meter.style.width='4%'; hrText.innerText='0 H/s'; accepted.innerText='0'; earn.innerText='0 TON';
@@ -258,7 +236,7 @@ function stopMining(){
 function withdraw(){
   if(!isTelegram){ alert('Open inside Telegram to withdraw.'); return; }
   const addr = resolveActiveAddress();
-  if(!addr){ alert('Link wallet or enter a valid TON address first.'); walletInput.focus(); return; }
+  if(!addr){ alert('Link wallet or enter an address first.'); walletInput.focus(); return; }
 
   const amount=parseFloat((earn.innerText||'0 TON').replace(' TON',''))||0;
   const payload={action:'withdraw',wallet:addr,amount,accepted:acceptedCount,hr:fakeHR,ts:Date.now()};
